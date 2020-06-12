@@ -13,6 +13,7 @@ import tensorflow as tf
 import pprint
 from tqdm import tqdm
 import cv2
+from time import sleep
 # %matplotlib inline
 
 
@@ -202,7 +203,8 @@ def initialize_model(sess, model, content_image, style_image):
     return sess, generated_image, train_step
 
 
-def model_nn(sess, input_image, train_step, num_iterations=200, output_dir="./"):
+def model_nn(sess, input_image, train_step, count, nframes,
+             num_iterations=200, output_dir="./"):
     # initialize global variables (you need to run the session on the
     # initializer)
     sess.run(tf.global_variables_initializer())
@@ -213,7 +215,7 @@ def model_nn(sess, input_image, train_step, num_iterations=200, output_dir="./")
 
     clear = lambda: os.system("clear")
     clear()
-    print("running the model...\n")
+    print("running the model on frame " + str(count)+"/"+str(nframes)+" ...\n")
     for i in tqdm(range(num_iterations)):
         # Run the session on the train_step to minimize the total cost
         sess.run(train_step)
@@ -229,42 +231,62 @@ def model_nn(sess, input_image, train_step, num_iterations=200, output_dir="./")
 
 if __name__ == "__main__":
     # Reset the graph and create a tensorflow's interactive session
-    tf.reset_default_graph()
-    sess = tf.InteractiveSession()
-
+    # tf.reset_default_graph()
+    # sess = tf.InteractiveSession()
     # create the folder where all the output frames will be saved
     output_folder = create_output_folder(sys.argv[1], sys.argv[2])
 
-    # load the video
-    # video = cv2.VideoCaputure(sys.argv[1])
-    video = imread(sys.argv[1])
-    videoframe_orighshape = video.shape
+    # load the VGG19 model
+    # model = load_vgg_model("./imagenet-vgg-verydeep-19.mat")
+
+    # define the layers and its contributions (lambda) for computing the style loss
+    STYLE_LAYERS = [("conv1_1", 0.2),  # (layer_name, lambda)
+                    ("conv1_2", 0.2),
+                    ("conv2_1", 0.2),
+                    ("conv2_2", 0.2),
+                    ("conv5_1", 0.2)]
+    save_style_layers(output_folder, STYLE_LAYERS)
 
     # read the style image
     style_image = imread(sys.argv[2])
 
-    # load the VGG19 model
-    model = load_vgg_model("./imagenet-vgg-verydeep-19.mat")
+    # load the video
+    video = cv2.VideoCapture(sys.argv[1])
+    videoframe_shape = (int(video.get(cv2.CAP_PROP_FRAME_HEIGHT)),
+                        int(video.get(cv2.CAP_PROP_FRAME_WIDTH)))
 
-    # define the layers and its contributions (lambda) for computing the style loss
-    STYLE_LAYERS = [("conv1_1", 0.2),  # (layer_name, lambda)
-                    ("conv2_2", 0.2),
-                    ("conv3_1", 0.2),
-                    ("conv4_2", 0.2),
-                    ("conv5_1", 0.2)]
-    save_style_layers(output_folder, STYLE_LAYERS)
+    nframes = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
+    count = 0
+    print("\n \n")
+    while(video.isOpened()):
+        # Reset the graph and create a tensorflow's interactive session
+        tf.reset_default_graph()
+        sess = tf.InteractiveSession()
+        model = load_vgg_model("./imagenet-vgg-verydeep-19.mat")
 
-    # initialize the model
-    sess, initialized_image, train_step = initialize_model(sess, model,
-                                                           video, style_image)
+        still, frame = video.read()
+        if still == False:
+            break
 
-    # run the model
-    generated_image = model_nn(sess, initialized_image, train_step, 200, output_folder)
+        # initialize the model
+        sess, initialized_image, train_step = initialize_model(sess, model,
+                                                               frame, style_image)
 
-    # resizing the generated image to the original size of the content image
-    generated_image = imread(output_folder + "/generated_image.jpg")
-    pil_generated_image = Image.fromarray(np.uint8(generated_image)).convert("RGB")
-    resized = pil_generated_image.resize((videoframe_orighshape[1],
-                                          videoframe_orighshape[0]))
-    resized = np.array(resized)
-    imwrite(output_folder + "/generated_image_resized.jpg", resized, dpi=(300,300))
+        # run the model
+        model_nn(sess, initialized_image, train_step, count+1, nframes,
+                 300, output_folder)
+
+        # resizing the generated image to the original size of the content image
+        generated_image = imread(output_folder + "/generated_image.jpg")
+        pil_generated_image = Image.fromarray(np.uint8(generated_image)).convert("RGB")
+        resized = pil_generated_image.resize((videoframe_shape[1],
+                                              videoframe_shape[0]))
+        resized = np.array(resized)
+        imwrite(output_folder + "/frame_" + str(count+1).zfill(3) + ".jpg",
+                resized, dpi=(300,300))
+        count += 1
+        sess.close()
+    video.release()
+    # i need to be able to generate a video after finished
+    # optimize zfill to authomatically set the number depending on the number
+    # of frames of the video
