@@ -1,4 +1,7 @@
 .*.swp
 .*.swo
+*.jpg
+style*.txt
+*.pyc
 *.mat
 *.MP4
